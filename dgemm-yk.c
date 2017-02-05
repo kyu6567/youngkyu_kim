@@ -29,12 +29,12 @@ static void do_block(int lda, int M, int N, int K, double* A, double* B, double*
 	
 	/* Load data */
 	int m = 0;
-	for (int i = 0; i < BLOCK_SIZE; i++)
-		for (int k = 0; k < BLOCK_SIZE; k++)
+	for (int i = 0; i < M; i++)
+		for (int k = 0; k < K; k++)
 			buff_A[m++] = A[i + lda*k];
 	m = 0;
-	for (int j = 0; j < BLOCK_SIZE; j++)
-		for (int k = 0; k < BLOCK_SIZE; k++)
+	for (int j = 0; j < N; j++)
+		for (int k = 0; k < K; k++)
 			buff_B[m++] = B[k + lda*j];
 
 	/* Operation */
