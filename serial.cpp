@@ -4,9 +4,12 @@
 #include <math.h>
 #include "common.h"
 
+#define cutoff  0.01
+#define density 0.0005
+
 typedef struct _node
 {
-	particle_t p;
+	particle_t* p;
 	struct _node* next;
 }node;
 
@@ -23,7 +26,7 @@ void init(list* lptr)
 	lptr->head = NULL;
 }
 
-void insert(list* lptr, particle_t particle)
+void insert(list* lptr, particle_t* particle)
 {
 	// insert particle_t
 	node* new_nptr = (node*)malloc(sizeof(node));
@@ -87,7 +90,7 @@ int main( int argc, char **argv )
         return 0;
     }
     
-    int n = read_int( argc, argv, "-n", 100000);
+    int n = read_int( argc, argv, "-n", 1000);
 
     char *savename = read_string( argc, argv, "-o", NULL );
     char *sumname = read_string( argc, argv, "-s", NULL );
@@ -96,10 +99,10 @@ int main( int argc, char **argv )
     FILE *fsum = sumname ? fopen ( sumname, "a" ) : NULL;
 
     particle_t *particles = (particle_t*) malloc( n * sizeof(particle_t) );
-    double size=set_size( n );
+    set_size( n );
     init_particles( n, particles );
 
-    int grid_size = size/0.01+1;
+    int grid_size = (sqrt( density * n ))/cutoff+1;
 
     //
     //  simulate a number of time steps
@@ -111,18 +114,6 @@ int main( int argc, char **argv )
 	navg = 0;
         davg = 0.0;
 	dmin = 1.0;
-
-    //
-    //  compute forces
-    //
-	/*
-        for( int i = 0; i < n; i++ )
-        {
-            particles[i].ax = particles[i].ay = 0;
-            for (int j = 0; j < n; j++ )
-				apply_force( particles[i], particles[j],&dmin,&davg,&navg);
-        }
-	*/
 		
 	//
 	// generate grid
@@ -141,7 +132,7 @@ int main( int argc, char **argv )
 	{
 		X = (int)(particles[i].x / 0.01);
 		Y = (int)(particles[i].y / 0.01);
-		insert(grid[X][Y],particles[i]);
+		insert(grid[X][Y],&particles[i]);
 	}
 
 	//
@@ -159,7 +150,7 @@ int main( int argc, char **argv )
 				node* tmp = grid[I][J]->head;
 				while (tmp != NULL)
 				{
-					apply_force(particles[i], tmp->p, &dmin, &davg, &navg);
+					apply_force(particles[i], *(tmp->p), &dmin, &davg, &navg);
 					tmp = tmp->next;
 				}
 			}
