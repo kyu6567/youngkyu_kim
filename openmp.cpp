@@ -5,6 +5,72 @@
 #include "common.h"
 #include "omp.h"
 
+#define cutoff  0.01
+#define density 0.0005
+
+typedef struct _node
+{
+    particle_t* p;
+    struct _node* next;
+}node;
+
+typedef struct _list
+{
+    int count;
+    node* head;
+}list;
+
+void init(list* lptr)
+{
+    // initialize the list
+    lptr->count = 0;
+    lptr->head = NULL;
+}
+
+void insert(list* lptr, particle_t* particle)
+{
+    // insert particle_t
+    node* new_nptr = (node*)malloc(sizeof(node));
+    new_nptr->p = particle;
+    if (lptr->count == 0)
+    {
+        new_nptr->next = NULL;
+        lptr->head = new_nptr;
+    }
+    else
+    {
+        node* tmp = lptr->head;
+        for (int i = 0; i < lptr->count - 1; i++)
+            tmp = tmp->next;
+        new_nptr->next = NULL;
+        tmp->next = new_nptr;
+    }
+    lptr->count++;
+}
+
+void del(list* lptr)
+{
+    // delete the list
+    while (lptr->head != NULL)
+    {
+        node* tmp = lptr->head;
+        if (lptr->count == 1)
+        {
+            lptr->head = NULL;
+            free(tmp);
+        }
+        else
+        {
+            for (int i = 1; i < lptr->count - 1; i++)
+                tmp = tmp->next;
+            node* tmp2 = tmp->next;
+            tmp->next = NULL;
+            free(tmp2);
+        }
+        lptr->count--;
+    }
+}
+
 //
 //  benchmarking program
 //
@@ -12,7 +78,8 @@ int main( int argc, char **argv )
 {   
     int navg,nabsavg=0,numthreads; 
     double dmin, absmin=1.0,davg,absavg=0.0;
-	
+    int X,Y;
+
     if( find_option( argc, argv, "-h" ) >= 0 )
     {
         printf( "Options:\n" );
@@ -34,32 +101,110 @@ int main( int argc, char **argv )
     particle_t *particles = (particle_t*) malloc( n * sizeof(particle_t) );
     set_size( n );
     init_particles( n, particles );
+    
+    //
+    // compute grid size
+    //
+    int grid_size = (sqrt( density * n ))/cutoff+1;
 
     //
     //  simulate a number of time steps
     //
     double simulation_time = read_timer( );
 
-    #pragma omp parallel private(dmin) 
-    {
+    //
+    // generate grid
+    //
+    list* grid[grid_size][grid_size];
+    #pragma omp parallel for collapse(2)
+    for(int i=0; i<grid_size;i++)
+        for(int j = 0; j < grid_size; j++)
+            grid[i][j] = (list*)malloc(sizeof(list));
+       
+#pragma omp parallel private(dmin)
+{
     numthreads = omp_get_num_threads();
     for( int step = 0; step < NSTEPS; step++ )
     {
         navg = 0;
         davg = 0.0;
-	dmin = 1.0;
+        dmin = 1.0;
+    
+		//
+		// initialize grid
+		//
+		#pragma omp for collapse(2)
+		for(int i=0; i<grid_size;i++)
+			for (int j = 0; j < grid_size; j++)
+				init(grid[i][j]);
+
+        //
+        // add particles to grid
+        //
+        #pragma omp for
+        for (int i = 0; i < n; i++)
+        {
+            X = (int)(particles[i].x / 0.01);
+            Y = (int)(particles[i].y / 0.01);
+            insert(grid[X][Y],&particles[i]);
+        }
+
         //
         //  compute all forces
         //
+        /* 
         #pragma omp for reduction (+:navg) reduction(+:davg)
         for( int i = 0; i < n; i++ )
         {
             particles[i].ax = particles[i].ay = 0;
-            for (int j = 0; j < n; j++ )
-                apply_force( particles[i], particles[j],&dmin,&davg,&navg);
+            X = (int)(particles[i].x / 0.01);
+            Y = (int)(particles[i].y / 0.01);
+            
+            for(int I=max(X-1,0);I<=min(X+1,grid_size-1);I++)
+                for(int J=max(Y-1,0);J<=min(Y+1,grid_size-1);J++)
+                {
+		    node* tmp = grid[I][J]->head;
+                    while (tmp != NULL)
+                    {
+                        apply_force(particles[i], *(tmp->p), &dmin, &davg, &navg);
+                        tmp = tmp->next;
+                    }
+                }
+        }
+        */
+        
+        #pragma omp for reduction (+:navg) reduction(+:davg)
+        for (int i = 0; i < grid_size; i++){
+            for (int j = 0; j < grid_size; j++){
+                
+                node* cur = grid[i][j]->head;
+                while(cur != NULL){
+                    cur->p->ax = cur->p->ay = 0;
+                    for(int I=max(i-1,0);I<=min(i+1,grid_size-1);I++){
+                        for(int J=max(j-1,0);J<=min(j+1,grid_size-1);J++)
+                        {
+                            node* tmp = grid[I][J]->head;
+                            while (tmp != NULL){
+                                apply_force(*(cur->p), *(tmp->p), &dmin, &davg, &navg);
+                                tmp = tmp->next;
+                            }
+                        }
+                    }
+                    
+                    cur = cur->next;
+                }
+            }
         }
         
+        //
+        // remove particles from grid
+        //
+        #pragma omp for collapse(2)
+        for (int i = 0; i< grid_size; i++)
+            for (int j = 0; j < grid_size; j++)
+                del(grid[i][j]);
 		
+        
         //
         //  move particles
         //
@@ -69,24 +214,26 @@ int main( int argc, char **argv )
   
         if( find_option( argc, argv, "-no" ) == -1 ) 
         {
-          //
-          //  compute statistical data
-          //
-          #pragma omp master
-          if (navg) { 
-            absavg += davg/navg;
-            nabsavg++;
-          }
+          
+			//
+			//  compute statistical data
+			//
+			#pragma omp master
+			if (navg) 
+			{
+			  absavg += davg/navg;
+			  nabsavg++;
+			}
 
-          #pragma omp critical
-	  if (dmin < absmin) absmin = dmin; 
+			//#pragma omp critical
+			if (dmin < absmin) absmin = dmin;
 		
-          //
-          //  save if necessary
-          //
-          #pragma omp master
-          if( fsave && (step%SAVEFREQ) == 0 )
-              save( fsave, n, particles );
+			//
+			//  save if necessary
+			//
+			#pragma omp master
+			if( fsave && (step%SAVEFREQ) == 0 )
+				save( fsave, n, particles );
         }
     }
 }
