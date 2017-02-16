@@ -3,7 +3,7 @@
 #include <assert.h>
 #include <math.h>
 #include "common.h"
-#include <libiomp/omp.h>
+#include "omp.h"
 
 #define cutoff  0.01
 #define density 0.0005
