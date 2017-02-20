@@ -7,7 +7,7 @@
 //#include <libiomp/omp.h>
 #include <vector>
 
-#define cutoff  0.05
+#define cutoff  0.01
 #define density 0.0005
 
 using namespace std;
